@@ -125,6 +125,10 @@ type StateDB struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
+	// The total amount of Ether that has been minted to the caller of the gasback precompile.
+	// At the end of a state transition, this has to be subtracted from the base gas fees paid out.
+	gasbackTotalMinted *uint256.Int
+
 	// The tx context and all occurred logs in the scope of transaction.
 	thash   common.Hash
 	txIndex int
@@ -423,6 +427,15 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 		return stateObject.selfDestructed
 	}
 	return false
+}
+
+// GasbackTotalMinted returns the total amount of Ether that has been
+// minted to the caller of the gasback precompile.
+func (s *StateDB) GasbackTotalMinted() *uint256.Int {
+	if s.gasbackTotalMinted == nil {
+		return new(uint256.Int)
+	}
+	return s.gasbackTotalMinted
 }
 
 /*
@@ -1489,4 +1502,9 @@ func (s *StateDB) PointCache() *utils.PointCache {
 // Witness retrieves the current state witness being collected.
 func (s *StateDB) Witness() *stateless.Witness {
 	return s.witness
+}
+
+// AddGasbackTotalMinted adds amount to GasbackTotalMinted.
+func (s *StateDB) AddGasbackTotalMinted(amount *uint256.Int) {
+	s.gasbackTotalMinted.Add(s.gasbackTotalMinted, amount)
 }

@@ -90,6 +90,9 @@ type StateDB interface {
 	AddPreimage(common.Hash, []byte)
 
 	Witness() *stateless.Witness
+
+	AddGasbackTotalMinted(*uint256.Int)
+	GasbackTotalMinted() *uint256.Int
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

@@ -27,6 +27,8 @@ var (
 	OptimismBaseFeeRecipient = common.HexToAddress("0x4200000000000000000000000000000000000019")
 	// The L1 portion of the transaction fee accumulates at this predeploy
 	OptimismL1FeeRecipient = common.HexToAddress("0x420000000000000000000000000000000000001A")
+	// The predeploy authorized to call the gasback precompile to convert gas into Ether.
+	OptimismGasbackRelayer = common.HexToAddress("0x4200000000000000000000000000000000000022")
 )
 
 const (
@@ -170,13 +172,6 @@ const (
 	Bls12381MapG2Gas          uint64 = 75000 // Gas price for BLS12-381 mapping field element to G2 operation
 
 	P256VerifyGas uint64 = 3450 // secp256r1 elliptic curve signature verifier gas price
-
-	// The gasback ratio is the fraction of the variable gas burned by the gasback precompile that will be converted back to Ether
-	GasbackRatioNumerator   uint64 = 9           // Numerator of the gasback ratio
-	GasbackRatioDenominator uint64 = 10          // Denominator of the gasback ratio
-	GasbackFlatOverheadGas  uint64 = 10000       // Flat gas price for the gasback precompile that will not be converted to Ether
-	GasbackTaperBaseFeeMin  uint64 = 1000000000  // The base fee (in wei) above which the gasback precompile's variable gas required will start to linearly interpolate to zero
-	GasbackTaperBaseFeeMax  uint64 = 10000000000 // The base fee (in wei) which the gasback precompile's variable gas required will be fully linearly interpolated to zero
 
 	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529

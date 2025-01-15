@@ -583,6 +583,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock && !st.msg.IsDepositTx {
 		gasCost := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+		gasCost = gasCost.Sub(gasCost, st.state.GasbackTotalMinted().ToBig())
 		amtU256, overflow := uint256.FromBig(gasCost)
 		if overflow {
 			return nil, fmt.Errorf("optimism gas cost overflows U256: %d", gasCost)

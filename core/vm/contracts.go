@@ -1345,43 +1345,17 @@ var (
 )
 
 // RequiredGas estimates the gas required for running the gasback precompile.
-func (c *gasback) RequiredGas(input []byte, evm *EVM, _ ContractRef) uint64 {
-	if evm == nil {
-		return math.MaxUint64
+func (c *gasback) RequiredGas(input []byte, _ *EVM, caller ContractRef) uint64 {
+	// Return 0 if the caller is anyone other than the OptimismGasbackAdapter address,
+	// since the precompile will simply return the OptimismGasbackRelayer address.
+	if caller.Address() != params.OptimismGasbackRelayer {
+		return 0
 	}
 
 	if len(input) != 32 {
 		return math.MaxUint64
 	}
 	gas := new(big.Int).SetBytes(input)
-
-	// To prevent this precompile from causing base fee to grow too high,
-	// via EIP-1559, we will taper off the amount of gas required as the
-	// base fee increases.
-	// Linearly interpolate the gas from its initial amount to zero as the
-	// basefee goes from GasbackTaperBaseFeeMin to GasbackTaperBaseFeeMax.
-	// Gradually changing the gas required helps prevent gas underestimation.
-
-	baseFee := evm.Context.BaseFee
-	// If `BaseFee > GasbackTaperBaseFeeMin`
-	if baseFee.Cmp(new(big.Int).SetUint64(params.GasbackTaperBaseFeeMin)) == 1 {
-		tween := new(big.Int).SetUint64(params.GasbackTaperBaseFeeMax)
-		// If `GasbackTaperBaseFeeMax >= BaseFee`
-		if tween.Sub(tween, baseFee).Sign() >= 0 {
-			gas.Mul(gas, tween)
-			// Since `GasbackTaperBaseFeeMax >= BaseFee > GasbackTaperBaseFeeMin`,
-			// `diff >= 1`.
-			diff := params.GasbackTaperBaseFeeMax - params.GasbackTaperBaseFeeMin
-			gas.Div(gas, new(big.Int).SetUint64(diff))
-		} else {
-			gas.SetUint64(0)
-		}
-	}
-
-	// Add a flat fee gas cost to this precompile.
-	// This flat fee will not be considered for conversion into Ether.
-	// This is to discourage users from calling this precompile in a loop.
-	gas.Add(gas, new(big.Int).SetUint64(params.GasbackFlatOverheadGas))
 
 	// If the amount of gas needed exceeds a uint64, set it to the maximum uint64 value.
 	if gas.BitLen() > 64 {
@@ -1392,49 +1366,39 @@ func (c *gasback) RequiredGas(input []byte, evm *EVM, _ ContractRef) uint64 {
 
 // Run executes the gasback precompile.
 func (c *gasback) Run(input []byte, evm *EVM, caller ContractRef) ([]byte, error) {
-	// Implements the gasback precompile.
-	// The retruned data is big endian, left-padded uint256 denoting the amount of
-	// Ether minted to the caller.
-
 	// Skip execution if this function is called without evm and caller.
 	if evm == nil || caller == nil {
 		return make([]byte, 32), nil
 	}
 
-	if len(input) != 32 {
-		return nil, errBadGasbackInputSize
-	}
-	gas := c.RequiredGas(input, evm, caller)
-	if gas > params.GasbackFlatOverheadGas {
-		gas -= params.GasbackFlatOverheadGas
-	} else {
-		gas = 0
+	// Return the OptimismGasbackRelayer address if the caller is
+	// anyone other than the OptimismGasbackAdapter address.
+	if caller.Address() != params.OptimismGasbackRelayer {
+		return common.LeftPadBytes(params.OptimismGasbackRelayer.Bytes(), 32), nil
 	}
 
-	if params.GasbackRatioDenominator == 0 {
-		return nil, errGasbackRatioDenominatorIsZero
+	// The input must be a uint256.
+	if len(input) != 32 {
+		return nil, nil
 	}
+
+	// Implements the gasback precompile.
+	// The retruned data is big endian, left-padded uint256 denoting the amount of
+	// Ether minted to the caller, which is the relayer.
+	gas := c.RequiredGas(input, evm, caller)
 	etherToGive := new(big.Int).SetUint64(gas)
 	etherToGive.Mul(etherToGive, evm.Context.BaseFee)
-	etherToGive.Mul(etherToGive, new(big.Int).SetUint64(params.GasbackRatioNumerator))
-	etherToGive.Div(etherToGive, new(big.Int).SetUint64(params.GasbackRatioDenominator))
 
 	finalEtherToGive, overflow := uint256.FromBig(etherToGive)
 	if overflow {
-		return nil, errGasbackArithmeticOverflow
+		return nil, nil
 	}
 
-	// As all of the base fee gas consumed by this precompile will be
-	// credited to the base fee recipient, we will need to deduct the
-	// amount of Ether minted from the balance of the base fee recipient.
-	// In practice, the base fee recipient will have a minimum amount of
-	// Ether it must hold before a withdraw can be triggered, so most of
-	// the time, it will have enough Ether for the temporary deduction.
-	baseFeeRecipient := params.OptimismBaseFeeRecipient
-	if !evm.Context.CanTransfer(evm.StateDB, baseFeeRecipient, finalEtherToGive) {
-		return make([]byte, 32), nil
-	}
-	evm.Context.Transfer(evm.StateDB, baseFeeRecipient, caller.Address(), finalEtherToGive)
-
-	return common.LeftPadBytes(etherToGive.Bytes(), 32), nil
+	// Add to the total amount of Ether minted by the gasback precompile.
+	// At the end of the state transition, this will be subtracted from the reward to the base fee vault.
+	evm.StateDB.AddGasbackTotalMinted(finalEtherToGive)
+	// Directly mint Ether to the caller.
+	evm.StateDB.AddBalance(caller.Address(), finalEtherToGive, tracing.BalanceChangeUnspecified)
+	// Returns the amount of Ether minted.
+	return common.LeftPadBytes(finalEtherToGive.Bytes(), 32), nil
 }
